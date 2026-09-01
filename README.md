@@ -362,13 +362,14 @@ All three applications support `--help`.
 
 The `tools/` directory contains a virtual-camera setup for Linux systems that do not have access to a physical camera. This is useful when developing on a shared server or other remote Linux system.
 
-`start_virtual_camera.sh` uses FFmpeg to continuously feed either a video file or a still image into a `v4l2loopback` virtual camera. Video files are looped continuously, while still images are repeated to produce a continuous camera stream.
+`start_virtual_camera.sh` uses FFmpeg to feed either a video file or a still image into a v4l2loopback virtual camera for up to two hours per invocation. Video files are looped for the duration of the session, while still images are repeated to produce a continuous camera stream.
 
 By default, the script uses:
 
 - media file `media/videos/female_model_2_720p.mp4`
 - virtual camera device `/dev/video10`
 - output frame rate of 30 fps
+- maximum run time of 2 hours
 
 The media file and virtual camera device can be overridden independently from the command line:
 
@@ -385,6 +386,8 @@ Use `-h` to display the available command-line options:
 ```sh
 ./tools/start_virtual_camera.sh -h
 ```
+
+The virtual camera terminates automatically after two hours if it is not stopped earlier. The PID file maintained by the start script is automatically removed when the FFmpeg process terminates.
 
 The output image is constrained to fit within a 1280 x 720 bounding box while preserving the source aspect ratio. Media smaller than this limit is not upscaled. For example, a 1600 x 1200 source produces a 960 x 720 virtual-camera image, while a 640 x 480 source remains 640 x 480.
 
