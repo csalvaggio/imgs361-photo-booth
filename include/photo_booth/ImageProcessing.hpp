@@ -5,6 +5,13 @@
 namespace photo_booth {
 
 /**
+ * @brief Calculates the histogram of each channel of an 8-bit BGR image.
+ *
+ * Channel histograms are returned in the rows of a 3x256 CV_32S.
+ */
+cv::Mat calcHist(const cv::Mat& image);
+
+/**
  * @brief Swaps the blue and red channels of an 8-bit BGR image.
  */
 cv::Mat swapRedBlueChannels(const cv::Mat& image);

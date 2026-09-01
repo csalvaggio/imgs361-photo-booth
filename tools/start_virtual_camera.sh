@@ -19,7 +19,7 @@
 #       Default: /dev/video10
 #
 #   -f  Video or still-image file to stream
-#       Default: female_model_2_720p.mp4 in this script's directory
+#       Default: media/videos/female_model_2_720p.mp4 in the project directory
 #
 #   -h  Display this help message
 #
@@ -41,7 +41,8 @@ SCRIPT_DIR="$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)"
 # Default configuration.
 # ---------------------------------------------------------------------------
 
-DEFAULT_MEDIA_FILE="${SCRIPT_DIR}/female_model_2_720p.mp4"
+PROJECT_DIR="$(cd "${SCRIPT_DIR}/.." && pwd)"
+DEFAULT_MEDIA_FILE="${PROJECT_DIR}/media/videos/female_model_2_720p.mp4"
 DEFAULT_VIDEO_DEVICE="/dev/video10"
 
 MEDIA_FILE="${DEFAULT_MEDIA_FILE}"
@@ -50,6 +51,7 @@ VIDEO_DEVICE="${DEFAULT_VIDEO_DEVICE}"
 MAX_WIDTH=1280
 MAX_HEIGHT=720
 FRAME_RATE=30
+RUN_DURATION="02:00:00"
 
 PID_FILE="${SCRIPT_DIR}/.virtual_camera.pid"
 LOG_FILE="${SCRIPT_DIR}/.virtual_camera.log"
@@ -277,6 +279,7 @@ ffmpeg \
     -an \
     -vf "scale=${OUTPUT_WIDTH}:${OUTPUT_HEIGHT}" \
     -r "${FRAME_RATE}" \
+    -t "${RUN_DURATION}" \
     -c:v mjpeg \
     -pix_fmt yuvj420p \
     -q:v 2 \
@@ -287,6 +290,15 @@ ffmpeg \
 PID=$!
 
 echo "${PID}" > "${PID_FILE}"
+
+# Remove the PID file when FFmpeg terminates.
+(
+    while kill -0 "${PID}" 2>/dev/null; do
+        sleep 1
+    done
+
+    rm -f "${PID_FILE}"
+) &
 
 # Give FFmpeg a moment to start.
 sleep 1
@@ -313,4 +325,5 @@ echo "Media type:        ${MEDIA_TYPE}"
 echo "Input resolution:  ${INPUT_WIDTH} x ${INPUT_HEIGHT}"
 echo "Camera resolution: ${OUTPUT_WIDTH} x ${OUTPUT_HEIGHT}"
 echo "Frame rate:        ${FRAME_RATE} fps"
-echo "Process ID:         ${PID}"
+echo "Maximum run time:  ${RUN_DURATION}"
+echo "Process ID:        ${PID}"

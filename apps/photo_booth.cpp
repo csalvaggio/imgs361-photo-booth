@@ -1,23 +1,31 @@
 #include <chrono>
 #include <cstdlib>
+#include <ctime>
 #include <exception>
 #include <filesystem>
+#include <iomanip>
 #include <iostream>
 #include <opencv2/highgui.hpp>
 #include <opencv2/imgcodecs.hpp>
 #include <opencv2/imgproc.hpp>
+#include <sstream>
 #include <string>
 
 #include "photo_booth/AppConfig.hpp"
 #include "photo_booth/ImageCapture.hpp"
 #include "photo_booth/ImageProcessing.hpp"
+#include "photo_booth/PlotDisplay.hpp"
 
 namespace {
 
+constexpr char kHistogramWindowName[] = "Photo Booth - Histogram";
+
 constexpr double kFpsUpdateIntervalSeconds = 1.0;
+constexpr int kHistogramUpdateInterval = 10;
 
 struct ProcessingState {
   bool inversion_enabled{false};
+  bool histogram_enabled{false};
   bool performance_overlay_enabled{false};
 };
 
@@ -26,24 +34,20 @@ cv::Mat processFrame(const cv::Mat& frame,
                      const ProcessingState& state) {
   cv::Mat processed_frame = frame.clone();
 
-  //
-  // Baseline pipeline operations
-  //
-  // These operations are controlled by the configuration file and are
-  // applied automatically to every acquired frame when enabled.
-  //
-  if (config.channel_swap_enabled) {
-    processed_frame = photo_booth::swapRedBlueChannels(processed_frame);
-  }
+  /**
+   * Image-processing operations
+   *
+   * Operations are placed in the pipeline according to the image
+   * representation they expect and the desired processing order, not according
+   * to whether they are controlled by configuration or interactively.
+   */
 
-  //
-  // Optional pipeline operations
-  //
-  // These operations are controlled interactively while the application
-  // is running.
-  //
   if (state.inversion_enabled) {
     processed_frame = photo_booth::invertImage(processed_frame);
+  }
+
+  if (config.channel_swap_enabled) {
+    processed_frame = photo_booth::swapRedBlueChannels(processed_frame);
   }
 
   return processed_frame;
@@ -98,20 +102,83 @@ void showPreviewFrame(const cv::Mat& frame,
   cv::imshow(config.window_name, preview_frame);
 }
 
+void resetProcessingState(ProcessingState& state) {
+  //
+  // Close any auxiliary windows associated with the current runtime state.
+  //
+  if (state.histogram_enabled) {
+    photo_booth::hidePlot(kHistogramWindowName);
+  }
+
+  //
+  // Restore all runtime processing, analysis, and display settings to their
+  // initial values. Configuration-controlled baseline operations are unchanged.
+  //
+  state = ProcessingState{};
+
+  std::cout << "Photo Booth RESET: All runtime processing and display options "
+               "OFF\n";
+}
+
+void printControls() {
+  std::cout << "\nPhoto Booth controls:\n"
+            << "\n"
+            << "  Processing\n"
+            << "    n      Toggle image negative/inversion\n"
+            << "\n"
+            << "  Analysis / display\n"
+            << "    h      Toggle histogram display\n"
+            << "    p      Toggle performance overlay\n"
+            << "\n"
+            << "  Application\n"
+            << "    Space  Capture image\n"
+            << "    Esc    Reset to startup state\n"
+            << "    ?      Show controls\n"
+            << "    q      Quit\n"
+            << '\n';
+}
+
 bool handleKey(const int key, ProcessingState& state) {
   switch (key) {
-    case 27:
+    //
+    // Application controls.
+    //
     case 'q':
     case 'Q':
       return false;
 
-    case 'i':
-    case 'I':
+    case 27:
+      resetProcessingState(state);
+      break;
+
+    case '?':
+      printControls();
+      break;
+
+    //
+    // Basic image processing.
+    //
+    case 'n':
+    case 'N':
       state.inversion_enabled = !state.inversion_enabled;
 
       std::cout << "Image inversion: "
                 << (state.inversion_enabled ? "ON" : "OFF") << '\n';
+      break;
 
+    //
+    // Analysis and display.
+    //
+    case 'h':
+    case 'H':
+      state.histogram_enabled = !state.histogram_enabled;
+
+      std::cout << "Histogram display: "
+                << (state.histogram_enabled ? "ON" : "OFF") << '\n';
+
+      if (!state.histogram_enabled) {
+        photo_booth::hidePlot(kHistogramWindowName);
+      }
       break;
 
     case 'p':
@@ -130,28 +197,29 @@ bool handleKey(const int key, ProcessingState& state) {
 }
 
 std::string makeTimestampFilename() {
-    const auto now = std::chrono::system_clock::now();
+  const auto now = std::chrono::system_clock::now();
 
-    const std::time_t now_time =
-        std::chrono::system_clock::to_time_t(now);
+  const std::time_t now_time = std::chrono::system_clock::to_time_t(now);
 
-    std::tm utc_time{};
-    gmtime_r(&now_time, &utc_time);
+  std::tm utc_time{};
+#if defined(_WIN32)
+  gmtime_s(&utc_time, &now_time);
+#else
+  gmtime_r(&now_time, &utc_time);
+#endif
 
-    const auto milliseconds =
-        std::chrono::duration_cast<std::chrono::milliseconds>(
-            now.time_since_epoch()) % 1000;
+  const auto milliseconds =
+      std::chrono::duration_cast<std::chrono::milliseconds>(
+          now.time_since_epoch()) %
+      1000;
 
-    std::ostringstream filename;
+  std::ostringstream filename;
 
-    filename << std::put_time(&utc_time, "%Y-%m-%dT%H-%M-%S")
-             << '.'
-             << std::setw(3)
-             << std::setfill('0')
-             << milliseconds.count()
-             << ".png";
+  filename << std::put_time(&utc_time, "%Y-%m-%dT%H-%M-%S") << '.'
+           << std::setw(3) << std::setfill('0') << milliseconds.count()
+           << ".png";
 
-    return filename.str();
+  return filename.str();
 }
 
 }  // namespace
@@ -173,9 +241,9 @@ int main(int argc, char* argv[]) {
       const std::string argument{argv[1]};
 
       if (argument == "-h" || argument == "--help") {
-        std::cout
-            << "Usage: " << argv[0] << " [config.toml]\n\n"
-            << "Runs the semester photo-booth image-processing application.\n";
+        std::cout << "Usage: " << argv[0] << " [config.toml]\n\n"
+                  << "Runs the semester photo-booth "
+                     "image-processing application.\n";
 
         return EXIT_SUCCESS;
       }
@@ -216,9 +284,24 @@ int main(int argc, char* argv[]) {
     cv::namedWindow(config.preview.window_name, cv::WINDOW_AUTOSIZE);
 
     //
-    // Runtime state for optional processing operations.
+    // Runtime state for optional processing, analysis, and display operations.
     //
     ProcessingState processing_state;
+
+    //
+    // Display the available keyboard controls.
+    //
+    printControls();
+
+    //
+    // State used to control the histogram display refresh rate.
+    //
+    // The histogram plot is intentionally refreshed less frequently than the
+    // camera preview because updating the external Gnuplot display every frame
+    // can block the main application loop. Initialize the counter so the first
+    // histogram is displayed immediately when the feature is enabled.
+    //
+    int histogram_update_counter = kHistogramUpdateInterval - 1;
 
     //
     // State used to measure the effective application frame rate.
@@ -242,6 +325,32 @@ int main(int argc, char* argv[]) {
       //
       cv::Mat processed_frame =
           processFrame(camera.image(), config.processing, processing_state);
+
+      //
+      // Calculate and display the histogram, if enabled.
+      //
+      // The histogram plot is refreshed only once every
+      // kHistogramUpdateInterval frames so the external Gnuplot display does
+      // not unnecessarily limit the camera-processing frame rate.
+      //
+      if (processing_state.histogram_enabled) {
+        ++histogram_update_counter;
+
+        if (histogram_update_counter >= kHistogramUpdateInterval) {
+          const cv::Mat histogram = photo_booth::calcHist(processed_frame);
+
+          photo_booth::showPlot(histogram, kHistogramWindowName,
+                                "Digital Count", "Number of Pixels");
+
+          histogram_update_counter = 0;
+        }
+      } else {
+        //
+        // Prime the counter so the histogram is updated immediately the next
+        // time the display is enabled.
+        //
+        histogram_update_counter = kHistogramUpdateInterval - 1;
+      }
 
       //
       // Update the measured application frame rate.
@@ -276,19 +385,18 @@ int main(int argc, char* argv[]) {
         break;
       }
 
-      if (key == ' ') {                                          
+      if (key == ' ') {
         const auto filename = save_directory / makeTimestampFilename();
-                                                                 
+
         if (cv::imwrite(filename.string(), processed_frame)) {
           std::cout << "Captured: " << filename << '\n';
-        } else {                     
+        } else {
           std::cerr << "Failed to save image: " << filename << '\n';
-        }                                                        
-      }                                                            
+        }
+      }
     }
 
     cv::destroyAllWindows();
-
   } catch (const cv::Exception& error) {
     std::cerr << "OpenCV error: " << error.what() << '\n';
 

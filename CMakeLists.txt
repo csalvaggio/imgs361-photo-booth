@@ -16,6 +16,15 @@ set(CMAKE_RUNTIME_OUTPUT_DIRECTORY "${CMAKE_BINARY_DIR}/bin")
 set(CMAKE_LIBRARY_OUTPUT_DIRECTORY "${CMAKE_BINARY_DIR}/lib")
 set(CMAKE_ARCHIVE_OUTPUT_DIRECTORY "${CMAKE_BINARY_DIR}/lib")
 
+if(NOT CMAKE_CONFIGURATION_TYPES AND NOT CMAKE_BUILD_TYPE)
+    set(
+        CMAKE_BUILD_TYPE
+        RelWithDebInfo
+        CACHE STRING
+        "Choose the type of build."
+        FORCE
+    )
+endif()
 
 # -----------------------------------------------------------------------------
 # Dependencies
@@ -54,6 +63,27 @@ FetchContent_Declare(
 )
 
 FetchContent_MakeAvailable(tomlplusplus)
+
+FetchContent_Declare(
+    portable_file_dialogs
+    GIT_REPOSITORY https://github.com/samhocevar/portable-file-dialogs.git
+    GIT_TAG        c12ea8c
+    SOURCE_SUBDIR  _do_not_build
+)
+
+FetchContent_MakeAvailable(portable_file_dialogs)
+
+add_library(portable_file_dialogs INTERFACE)
+
+target_include_directories(
+    portable_file_dialogs
+    INTERFACE
+        ${portable_file_dialogs_SOURCE_DIR}
+)
+
+find_program(GNUPLOT_EXECUTABLE gnuplot REQUIRED)
+
+message(STATUS "Found gnuplot: ${GNUPLOT_EXECUTABLE}")
 
 
 # -----------------------------------------------------------------------------
@@ -125,11 +155,20 @@ target_link_libraries(
 add_library(
     photo_booth_core
     src/AppConfig.cpp
+    src/FileSelection.cpp
     src/ImageCapture.cpp
     src/ImageProcessing.cpp
+    src/PlotDisplay.cpp
+    src/SpectrumDisplay.cpp
 )
 
 add_library(PhotoBooth::core ALIAS photo_booth_core)
+
+target_compile_definitions(
+    photo_booth_core
+    PRIVATE
+        GNUPLOT_EXECUTABLE="${GNUPLOT_EXECUTABLE}"
+)
 
 target_compile_features(
     photo_booth_core
@@ -150,6 +189,7 @@ target_link_libraries(
         ${OpenCV_LIBS}
     PRIVATE
         tomlplusplus::tomlplusplus
+        portable_file_dialogs
         PhotoBooth::warnings
 )
 

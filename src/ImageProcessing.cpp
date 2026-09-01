@@ -22,6 +22,22 @@ void validateImage(const cv::Mat& image, const char* function_name) {
 
 }  // namespace
 
+cv::Mat calcHist(const cv::Mat& image) {
+  validateImage(image, "calcHist()");
+
+  cv::Mat histogram = cv::Mat_<int>::zeros(3, 256);
+  for (int row = 0; row < image.rows; ++row) {
+    for (int column = 0; column < image.cols; ++column) {
+      auto value = image.at<cv::Vec3b>(row, column);
+      histogram.at<int>(0, value[0])++;
+      histogram.at<int>(1, value[1])++;
+      histogram.at<int>(2, value[2])++;
+    }
+  }
+
+  return histogram;
+}
+
 cv::Mat swapRedBlueChannels(const cv::Mat& image) {
   validateImage(image, "swapRedBlueChannels()");
 
