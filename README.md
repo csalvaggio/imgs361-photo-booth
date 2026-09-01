@@ -8,9 +8,9 @@ The project intentionally separates reusable support code from application-speci
 
 The project builds three executables:
 
-- `live_preview` ? minimal camera acquisition and display example
-- `photo_booth` ? semester project baseline with an explicit processing pipeline
-- `capture_single_image` ? diagnostic/example utility that saves one acquired frame
+- `live_preview` - minimal camera acquisition and display example
+- `photo_booth` - semester project baseline with an explicit processing pipeline
+- `capture_single_image` - diagnostic/example utility that saves one acquired frame
 
 ### `live_preview`
 
@@ -58,35 +58,35 @@ OpenCV's property is named `CAP_PROP_CONVERT_RGB`, but normal decoded OpenCV col
 
 ```text
 imgs361-photo-booth/
-??? CMakeLists.txt
-??? config.toml
-??? LICENSE
-??? README.md
-??? apps/
-?   ??? capture_single_image.cpp
-?   ??? live_preview.cpp
-?   ??? photo_booth.cpp
-??? include/
-?   ??? photo_booth/
-?       ??? AppConfig.hpp
-?       ??? FileSelection.hpp
-?       ??? ImageCapture.hpp
-?       ??? ImageProcessing.hpp
-?       ??? PlotDisplay.hpp
-?       ??? SpectrumDisplay.hpp
-??? media/
-?   ??? stills/
-?   ??? videos/
-??? src/
-?   ??? AppConfig.cpp
-?   ??? FileSelection.cpp
-?   ??? ImageCapture.cpp
-?   ??? ImageProcessing.cpp
-?   ??? PlotDisplay.cpp
-?   ??? SpectrumDisplay.cpp
-??? tools/
-    ??? start_virtual_camera.sh
-    ??? stop_virtual_camera.sh
+|-- CMakeLists.txt
+|-- config.toml
+|-- LICENSE
+|-- README.md
+|-- apps/
+|   |-- capture_single_image.cpp
+|   |-- live_preview.cpp
+|   `-- photo_booth.cpp
+|-- include/
+|   `-- photo_booth/
+|       |-- AppConfig.hpp
+|       |-- FileSelection.hpp
+|       |-- ImageCapture.hpp
+|       |-- ImageProcessing.hpp
+|       |-- PlotDisplay.hpp
+|       `-- SpectrumDisplay.hpp
+|-- media/
+|   |-- stills/
+|   `-- videos/
+|-- src/
+|   |-- AppConfig.cpp
+|   |-- FileSelection.cpp
+|   |-- ImageCapture.cpp
+|   |-- ImageProcessing.cpp
+|   |-- PlotDisplay.cpp
+|   `-- SpectrumDisplay.cpp
+`-- tools/
+    |-- start_virtual_camera.sh
+    `-- stop_virtual_camera.sh
 ```
 
 `ImageCapture` wraps OpenCV's `cv::VideoCapture`. `AppConfig` defines and loads the typed application configuration. `FileSelection` provides image-file selection using a graphical dialog when available and a terminal fallback for headless sessions. `ImageProcessing` contains reusable image-processing and analysis functions. `PlotDisplay` provides a generic interface for displaying one-dimensional sampled data using Gnuplot. `SpectrumDisplay` displays complex two-dimensional Fourier-domain data using OpenCV.
@@ -145,9 +145,9 @@ Compiled executables are placed in `build/bin`:
 
 ```text
 build/bin/
-??? capture_single_image
-??? live_preview
-??? photo_booth
+|-- capture_single_image
+|-- live_preview
+`-- photo_booth
 ```
 
 The project requests strict ISO C++20 (`CXX_EXTENSIONS OFF`) and enables common compiler warnings for both the core library and all student-facing applications.
@@ -227,13 +227,13 @@ or:
 
 Controls:
 
-- `n` ? toggle image negative/inversion on/off
-- `h` ? toggle the live histogram display on/off
-- `p` ? toggle the performance overlay on/off
-- `Space` ? save the current processed image
-- `Esc` ? reset all runtime processing, analysis, and display options to their startup state
-- `?` ? display the keyboard controls
-- `q` ? quit
+- `n` - toggle image negative/inversion on/off
+- `h` - toggle the live histogram display on/off
+- `p` - toggle the performance overlay on/off
+- `Space` - save the current processed image
+- `Esc` - reset all runtime processing, analysis, and display options to their startup state
+- `?` - display the keyboard controls
+- `q` - quit
 
 The controls are printed when the application starts and can be displayed again with `?`. The `Esc` reset affects runtime state only; baseline processing controlled by `config.toml`, such as `processing.channel_swap_enabled`, remains unchanged.
 
