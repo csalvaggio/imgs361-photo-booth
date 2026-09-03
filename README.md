@@ -89,9 +89,9 @@ imgs361-photo-booth/
     `-- stop_virtual_camera.sh
 ```
 
-`ImageCapture` wraps OpenCV's `cv::VideoCapture`. `AppConfig` defines and loads the typed application configuration. `FileSelection` provides image-file selection using a graphical dialog when available and a terminal fallback for headless sessions. `ImageProcessing` contains reusable image-processing and analysis functions. `PlotDisplay` provides a generic interface for displaying one-dimensional sampled data using Gnuplot. `SpectrumDisplay` displays complex two-dimensional Fourier-domain data using OpenCV.
+`ImageCapture` wraps OpenCV's `cv::VideoCapture`. `AppConfig` defines and loads the typed application configuration. `FileSelection` provides image-file selection using a graphical dialog when available and a terminal fallback for headless sessions. `ImageProcessing` contains reusable image-processing and analysis functions. `PlotDisplay` provides a generic interface for displaying one-dimensional sampled data using Gnuplot, either as a single graph or as multiple vertically stacked graphs. `SpectrumDisplay` displays complex two-dimensional Fourier-domain data using OpenCV.
 
-`PlotDisplay` is intentionally generic so that it can later be reused for histograms, probability density functions, cumulative distribution functions, image profiles, and other sampled data. `SpectrumDisplay` provides corresponding display support for Fourier magnitude and phase visualizations.
+`PlotDisplay` is intentionally generic so that it can later be reused for histograms, probability density functions, cumulative distribution functions, image profiles, lookup tables (LUTs), and other sampled data. `showPlot()` preserves the simple single-graph interface used by the starter histogram display, while `showPlots()` accepts a collection of `Plot` descriptions for related graphs that should appear together in one window. Each graph uses a square aspect ratio and may provide its own title, axis labels, and optional vertical-axis limits. The operating-system window title is independent of the stable name used to identify the Gnuplot window, and the window height scales with the number of displayed graphs so individual plots remain approximately the same size when the layout changes. `SpectrumDisplay` provides corresponding display support for Fourier magnitude and phase visualizations.
 
 ## Student-facing files
 
@@ -111,7 +111,7 @@ include/photo_booth/AppConfig.hpp
 src/AppConfig.cpp
 ```
 
-`ImageCapture`, `FileSelection`, `PlotDisplay`, `SpectrumDisplay`, and most of the top-level CMake configuration can be treated as supplied infrastructure unless a project extension specifically requires changes there. The starter `ImageProcessing` implementation also supplies `calcHist()` as an example analysis function. Students may use `PlotDisplay` when an operation produces one-dimensional sampled data that should be visualized and `SpectrumDisplay` when displaying complex Fourier-domain image data, but ordinary image-processing operations should not require changes to either display component.
+`ImageCapture`, `FileSelection`, `PlotDisplay`, `SpectrumDisplay`, and most of the top-level CMake configuration can be treated as supplied infrastructure unless a project extension specifically requires changes there. The starter `ImageProcessing` implementation also supplies `calcHist()` as an example analysis function. Students may use `showPlot()` for a single one-dimensional result or `showPlots()` for several related one-dimensional results that should be compared in one window. `SpectrumDisplay` is available for complex Fourier-domain image data. Ordinary image-processing operations should not require changes to either display component.
 
 Ordinary processing operations added to the existing `ImageProcessing.cpp` do **not** require a CMake change.
 
@@ -330,7 +330,28 @@ This keeps three responsibilities distinct:
 
 The supplied histogram display demonstrates this pattern. `calcHist()` analyzes the completed `processed_frame` and returns a `3 x 256` matrix containing the B, G, and R channel histograms. `showPlot()` displays that result, while `hidePlot()` closes the histogram window when the display is disabled or the runtime pipeline is reset.
 
-More generally, one-dimensional analysis functions can return a `cv::Mat` whose rows represent separate curves and whose columns represent samples. Those results can also be displayed with `showPlot()`. Examples of data suited to this pattern include PDFs, CDFs, image profiles, and other sampled measurements.
+More generally, one-dimensional analysis functions can return a `cv::Mat` whose rows represent separate curves and whose columns represent samples. A single result can be displayed with `showPlot()`. When several related results are useful together, construct `Plot` descriptions and pass them to `showPlots()`. The plots are stacked vertically in one Gnuplot window; each graph has a square aspect ratio and can have its own title, axis labels, and optional `y_min`/`y_max` limits. For comparisons such as before/after histograms, using a common vertical range makes differences in shape and magnitude easier to interpret. Examples of data suited to this pattern include histograms, PDFs, CDFs, LUTs, image profiles, and other sampled measurements.
+
+A processing routine that constructs a LUT internally may also need to expose the **exact LUT that it applied** so an analysis display can visualize the transformation without independently recalculating it. A useful optional-output pattern is:
+
+```cpp
+cv::Mat someLutOperation(const cv::Mat& image,
+                         cv::Mat* applied_lut = nullptr);
+```
+
+The implementation computes the LUT once, optionally returns it to the caller, and then applies that same LUT to the image:
+
+```cpp
+const cv::Mat lut = /* calculate LUT */;
+
+if (applied_lut != nullptr) {
+  *applied_lut = lut;
+}
+
+return applyLut(image, lut);
+```
+
+This preserves the simple processing call when the LUT is not needed while guaranteeing that any plotted LUT is the one actually used to produce the output image. The starter branch does not yet contain LUT-based processing operations; this pattern becomes relevant when such operations are added.
 
 For two-dimensional complex Fourier-domain data, an analysis function can return a `CV_32FC2` complex spectrum. `showSpectrum()` can then display either its magnitude or phase, and `hideSpectrum()` closes the spectrum window. The display component handles visualization; it does not calculate the Fourier transform itself.
 
