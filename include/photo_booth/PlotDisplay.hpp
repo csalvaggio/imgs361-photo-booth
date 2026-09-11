@@ -15,8 +15,10 @@ namespace photo_booth {
  * red, corresponding to the canonical BGR channel ordering used by the
  * application.
  *
- * The plot title is drawn inside the graph near the upper-right corner using
- * an opaque textbox so it does not consume space above the plot.
+ * The plot title is drawn in a reserved margin to the right of the graph using
+ * a left-justified opaque textbox. Optional annotation text is drawn in the
+ * same textbox beneath the title. All plots use the same margin geometry so
+ * vertically stacked graph areas remain aligned.
  *
  * If y_min or y_max is not specified, that bound is automatically scaled by
  * Gnuplot.
@@ -30,6 +32,8 @@ struct Plot {
 
   std::optional<double> y_min;
   std::optional<double> y_max;
+
+  std::string annotation;
 };
 
 /**

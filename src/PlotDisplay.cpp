@@ -2,6 +2,7 @@
 
 #include <algorithm>
 #include <cstdio>
+#include <csignal>
 #include <memory>
 #include <stdexcept>
 #include <string>
@@ -12,6 +13,38 @@
 namespace photo_booth {
 
 namespace {
+
+class GnuplotCommunicationError : public std::runtime_error {
+ public:
+  using std::runtime_error::runtime_error;
+};
+
+void ignoreBrokenPipeSignal() {
+#ifdef SIGPIPE
+  //
+  // stdio writes to a pipe whose child process has exited normally raise
+  // SIGPIPE before fprintf()/fflush() can report an error. Ignore SIGPIPE so
+  // the plotting code can detect the failed write and recover gracefully.
+  // The Photo Booth uses no other application-managed pipes, so installing
+  // this process-wide disposition here is appropriate.
+  //
+  static const bool signal_ignored = [] {
+    std::signal(SIGPIPE, SIG_IGN);
+    return true;
+  }();
+
+  (void)signal_ignored;
+#endif
+}
+
+void flushGnuplotPipe(std::FILE* pipe) {
+  const int flush_result = std::fflush(pipe);
+
+  if (flush_result == EOF || std::ferror(pipe) != 0) {
+    throw GnuplotCommunicationError(
+        "Lost communication with the gnuplot process");
+  }
+}
 
 std::string quoteGnuplotString(const std::string& text) {
   std::string result{"'"};
@@ -25,6 +58,37 @@ std::string quoteGnuplotString(const std::string& text) {
   }
 
   result += '\'';
+
+  return result;
+}
+
+std::string quoteGnuplotMultilineString(const std::string& text) {
+  std::string result{"\""};
+
+  for (const char character : text) {
+    switch (character) {
+      case '\\':
+        result += "\\\\";
+        break;
+
+      case '"':
+        result += "\\\"";
+        break;
+
+      case '\n':
+        result += "\\n";
+        break;
+
+      case '\r':
+        break;
+
+      default:
+        result += character;
+        break;
+    }
+  }
+
+  result += '"';
 
   return result;
 }
@@ -71,6 +135,8 @@ int plotWindowHeight(const std::size_t plot_count) {
 class GnuplotWindow {
  public:
   explicit GnuplotWindow(const std::string& window_name) {
+    ignoreBrokenPipeSignal();
+
     const std::string command = "\"" + std::string(GNUPLOT_EXECUTABLE) + "\"";
 
     pipe_ = popen(command.c_str(), "w");
@@ -81,16 +147,31 @@ class GnuplotWindow {
 
     const std::string title = quoteGnuplotString(window_name);
 
-    std::fprintf(pipe_, "set term qt noraise title %s\n", title.c_str());
-    std::fputs("set key off\n", pipe_);
-    std::fputs("set style textbox opaque noborder\n", pipe_);
-    std::fflush(pipe_);
+    try {
+      std::fprintf(pipe_,
+                   "set term qt font \"Arial,9\" noraise title %s\n",
+                   title.c_str());
+      std::fputs("set key off\n", pipe_);
+      std::fputs("set style textbox opaque noborder\n", pipe_);
+      flushGnuplotPipe(pipe_);
+    } catch (...) {
+      //
+      // A constructor that throws does not run this object's destructor, so
+      // close the pipe explicitly before propagating the startup failure.
+      //
+      ::pclose(pipe_);
+      pipe_ = nullptr;
+      throw;
+    }
   }
 
   ~GnuplotWindow() {
     if (pipe_ != nullptr) {
-      std::fputs("exit\n", pipe_);
-      std::fflush(pipe_);
+      //
+      // Closing Gnuplot's standard input is sufficient to terminate it. Do
+      // not write an explicit "exit" command here: the child may already have
+      // exited, and destructors must never throw while cleaning up a dead pipe.
+      //
       ::pclose(pipe_);
     }
   }
@@ -113,7 +194,11 @@ class GnuplotWindow {
     // the terminal geometry when the number of subplots changes. Likewise, only
     // update the operating-system window title when the requested title changes.
     //
-    constexpr int kPlotWindowWidth = 600;
+    // Reserve horizontal space to the right of each graph for the plot label and
+    // optional annotation. Keeping this width fixed for every subplot makes the
+    // graph rectangles line up vertically in two- and three-plot layouts.
+    constexpr int kPlotWindowWidth = 800;
+    constexpr int kRightMarginCharacters = 34;
 
     const bool plot_count_changed = plots.size() != plot_count_;
     const bool window_title_changed = window_title != window_title_;
@@ -122,16 +207,39 @@ class GnuplotWindow {
       const int window_height = plotWindowHeight(plots.size());
 
       std::fprintf(pipe_,
-                   "set term qt size %d,%d noraise title %s\n",
+                   "set term qt size %d,%d font \"Arial,9\" noraise title %s\n",
                    kPlotWindowWidth, window_height,
                    quoted_window_title.c_str());
 
       plot_count_ = plots.size();
       window_title_ = window_title;
     } else if (window_title_changed) {
-      std::fprintf(pipe_, "set term qt noraise title %s\n",
+      std::fprintf(pipe_,
+                   "set term qt font \"Arial,9\" noraise title %s\n",
                    quoted_window_title.c_str());
       window_title_ = window_title;
+    }
+
+    //
+    // Gnuplot 6 does not support the inline '-' pseudo-file inside multiplot
+    // because the data cannot be saved for multiplot redraws. Define named
+    // datablocks before entering multiplot mode instead. Datablocks are also
+    // supported by Gnuplot 5, so this remains portable to older installations.
+    //
+    for (std::size_t plot_index = 0; plot_index < plots.size(); ++plot_index) {
+      const auto& plot = plots[plot_index];
+
+      for (int row = 0; row < plot.data.rows; ++row) {
+        std::fprintf(pipe_, "$PhotoBoothPlot%zuRow%d << EOD\n", plot_index,
+                     row);
+
+        for (int column = 0; column < plot.data.cols; ++column) {
+          std::fprintf(pipe_, "%d %.17g\n", column,
+                       plot.data.at<double>(row, column));
+        }
+
+        std::fputs("EOD\n", pipe_);
+      }
     }
 
     //
@@ -146,17 +254,32 @@ class GnuplotWindow {
     std::fprintf(pipe_, "set multiplot layout %zu,1 rowsfirst\n",
                  plots.size());
 
-    for (const auto& plot : plots) {
-      const std::string subplot_title = quoteGnuplotString(plot.title);
+    for (std::size_t plot_index = 0; plot_index < plots.size(); ++plot_index) {
+      const auto& plot = plots[plot_index];
       const std::string x_axis_label = quoteGnuplotString(plot.x_label);
       const std::string y_axis_label = quoteGnuplotString(plot.y_label);
 
+      std::string plot_label = plot.title;
+
+      if (!plot.annotation.empty()) {
+        if (!plot_label.empty()) {
+          plot_label += '\n';
+        }
+
+        plot_label += plot.annotation;
+      }
+
+      const std::string quoted_plot_label =
+          quoteGnuplotMultilineString(plot_label);
+
       //
-      // Put the subplot name inside the graph rather than reserving vertical
-      // space above it. The boxed label uses Gnuplot's opaque textbox style so
-      // plot curves do not make the label difficult to read.
+      // Put the subplot name and optional annotation in the reserved margin to
+      // the right of the graph. The label is anchored just beyond the graph
+      // boundary and left-justified. Because every subplot uses the same right
+      // margin, the graph rectangles remain aligned vertically.
       //
       std::fputs("unset title\n", pipe_);
+      std::fprintf(pipe_, "set rmargin %d\n", kRightMarginCharacters);
 
       //
       // A multiplot layout establishes a fresh nominal size for each subplot.
@@ -165,12 +288,12 @@ class GnuplotWindow {
       //
       std::fputs("set size square\n", pipe_);
 
-      if (plot.title.empty()) {
+      if (plot_label.empty()) {
         std::fputs("unset label 1\n", pipe_);
       } else {
         std::fprintf(pipe_,
-                     "set label 1 %s at graph 0.97,0.95 right front boxed\n",
-                     subplot_title.c_str());
+                     "set label 1 %s at graph 1.05,0.95 left front boxed\n",
+                     quoted_plot_label.c_str());
       }
 
       std::fprintf(pipe_, "set xlabel %s\n", x_axis_label.c_str());
@@ -189,7 +312,8 @@ class GnuplotWindow {
       }
 
       //
-      // Each row of the cv::Mat is displayed as one data series.
+      // Each row of the cv::Mat is displayed as one data series. The data
+      // itself was loaded into named datablocks above, before multiplot mode.
       //
       std::fputs("plot ", pipe_);
 
@@ -199,30 +323,19 @@ class GnuplotWindow {
         }
 
         std::fprintf(
-            pipe_, "'-' using 1:2 with lines linecolor rgb '%s' notitle",
-            lineColor(row));
+            pipe_,
+            "$PhotoBoothPlot%zuRow%d using 1:2 with lines "
+            "linecolor rgb '%s' notitle",
+            plot_index, row, lineColor(row));
       }
 
       std::fputc('\n', pipe_);
-
-      //
-      // Stream each row directly to Gnuplot.
-      //
-      for (int row = 0; row < plot.data.rows; ++row) {
-        for (int column = 0; column < plot.data.cols; ++column) {
-          std::fprintf(pipe_, "%d %.17g\n", column,
-                       plot.data.at<double>(row, column));
-        }
-
-        std::fputs("e\n", pipe_);
-      }
-
       std::fputs("unset label 1\n", pipe_);
     }
 
     std::fputs("unset multiplot\n", pipe_);
     std::fputs("set size nosquare\n", pipe_);
-    std::fflush(pipe_);
+    flushGnuplotPipe(pipe_);
   }
 
  private:
@@ -261,21 +374,37 @@ void showPlots(const std::vector<Plot>& plots, const std::string& window_name,
 
   auto& windows = plotWindows();
 
-  auto iterator = windows.find(window_name);
+  const auto update_window = [&]() {
+    auto iterator = windows.find(window_name);
 
-  if (iterator == windows.end()) {
-    auto window = std::make_unique<GnuplotWindow>(window_name);
+    if (iterator == windows.end()) {
+      auto window = std::make_unique<GnuplotWindow>(window_name);
 
-    iterator = windows.emplace(window_name, std::move(window)).first;
+      iterator = windows.emplace(window_name, std::move(window)).first;
+    }
+
+    iterator->second->update(converted_plots, window_title);
+  };
+
+  try {
+    update_window();
+  } catch (const GnuplotCommunicationError&) {
+    //
+    // The plot process may have been closed or may have terminated
+    // unexpectedly. Discard the stale pipe and recreate the window once. A
+    // second failure is allowed to propagate to the caller as a real plotting
+    // error rather than repeatedly restarting Gnuplot every frame.
+    //
+    windows.erase(window_name);
+    update_window();
   }
-
-  iterator->second->update(converted_plots, window_title);
 }
 
 void showPlot(const cv::Mat& data, const std::string& window_name,
               const std::string& x_label, const std::string& y_label) {
-  showPlots({Plot{data, "", x_label, y_label, std::nullopt, std::nullopt}},
-            window_name, window_name);
+  showPlots(
+      {Plot{data, "", x_label, y_label, std::nullopt, std::nullopt, ""}},
+      window_name, window_name);
 }
 
 void hidePlot(const std::string& window_name) {
